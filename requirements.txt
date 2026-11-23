@@ -1,0 +1,16 @@
+# Core (live dashboard, recording, analysis)
+fastapi
+uvicorn
+websockets
+numpy
+pandas
+pyarrow
+duckdb
+plotly
+
+# Game camera feed (window capture + JPEG encoding)
+mss
+opencv-python        # or: pillow, a slower fallback encoder
+
+# Optional: only needed if you set CAMERA_MODE = "monitor" in live_server.py
+# dxcam

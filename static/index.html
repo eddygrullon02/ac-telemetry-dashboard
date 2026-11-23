@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AC Live Telemetry</title>
+<style>
+  :root {
+    --bg: #0b1020; --card: #101830; --line: #233056; --inner: #0a1128;
+    --text: #e8ecf8; --muted: #8a96b8;
+    --green: #38d66b; --red: #ff4d5a; --blue: #4da3ff; --amber: #ffb020; --purple: #c77dff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+         display: flex; flex-direction: column;
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+  /* ---------- header ---------- */
+  header { flex: 0 0 auto; height: 40px; display: flex; align-items: center; gap: 16px;
+           padding: 0 14px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; white-space: nowrap; }
+  #session { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conn { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+  .dot.on { background: var(--green); }
+
+  #offline { display: none; position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 10;
+             background: var(--amber); color: #111; padding: 4px 14px; border-radius: 999px;
+             font-size: 12px; font-weight: 600; box-shadow: 0 2px 10px #0008; }
+
+  /* ---------- desktop layout: everything fits in the window, no scrolling ---------- */
+  main { flex: 1 1 0; min-height: 0; display: grid; gap: 8px; padding: 8px;
+         grid-template-columns: minmax(250px, 22%) minmax(0, 1fr) minmax(280px, 29%); }
+  .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+  .row { display: flex; gap: 8px; min-height: 0; min-width: 0; }
+
+  .card { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden;
+          background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px 8px; }
+  .card h2 { flex: 0 0 auto; margin: 0 0 5px; display: flex; align-items: center; gap: 8px;
+             font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
+  .card h2 .sp { margin-left: auto; }
+  .cbody { position: relative; flex: 1 1 0; min-height: 0; }
+  .cbody canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .cbody.stack { display: flex; flex-direction: column; justify-content: space-evenly; }
+
+  .label { flex: 0 0 auto; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .bar { flex: 0 0 auto; height: 10px; background: var(--inner); border-radius: 5px; overflow: hidden; margin: 3px 0 2px; }
+  .bar > div { height: 100%; width: 0; }
+  #rpmFill { background: var(--blue); } #gasFill { background: var(--green); } #brakeFill { background: var(--red); }
+
+  .gear { position: absolute; top: 0; right: 2px; text-align: right; font-weight: 700; color: var(--amber);
+          font-size: clamp(30px, 6.5vh, 64px); line-height: 1; }
+  .gear small { display: block; font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .08em; margin-bottom: 2px; }
+
+  .irow { display: grid; grid-template-columns: 62px 1fr 46px; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .irow b { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .irow .bar { margin: 0; height: 12px; }
+  .steer { position: relative; height: 12px; background: var(--inner); border-radius: 6px; }
+  .steer > div { position: absolute; top: 0; width: 8px; height: 12px; background: var(--amber); border-radius: 4px; left: 0; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+  .grid2 .l { font-size: 11px; color: var(--muted); }
+  .grid2 .v { font-size: clamp(15px, 2.7vh, 24px); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .tyres { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; height: 100%; }
+  .tyre { border-radius: 8px; padding: 4px; text-align: center; background: var(--inner); border: 1px solid var(--line);
+          display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+  .tyre .t { font-size: clamp(15px, 3vh, 28px); font-weight: 700; line-height: 1.1; }
+  .tyre .s { font-size: clamp(10px, 1.5vh, 12px); color: #d6dcf0; opacity: .8; }
+
+  /* camera */
+  select, button { background: var(--inner); color: var(--text); border: 1px solid var(--line);
+                   border-radius: 6px; padding: 3px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+  button { cursor: pointer; } button:hover { border-color: var(--blue); }
+  #cam { display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+         background: #000; border-radius: 6px; }
+  #camPlaceholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                    color: var(--muted); font-size: 13px; background: var(--inner); border-radius: 6px; text-align: center; padding: 10px; }
+  .note { flex: 0 0 auto; font-size: 10px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- narrow screens (phones, small windows): stack and scroll ---------- */
+  @media (max-width: 1100px) {
+    body { display: block; overflow: auto; }
+    header { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+    main { display: block; padding: 8px; }
+    .col, .row { display: block; }
+    .col { margin-bottom: 8px; }
+    .card { flex: none !important; margin-bottom: 8px; }
+    .cbody { flex: none; height: var(--h, 220px); }
+    .cbody.stack { height: auto !important; gap: 12px; padding: 6px 0; }
+    .gear { font-size: 52px; }
+    .tyres { height: auto; }
+    .tyre { padding: 8px 4px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AC Live Telemetry</h1>
+  <span id="session">waiting for session...</span>
+  <span class="conn"><span id="dot" class="dot"></span><span id="connText">connecting</span></span>
+</header>
+<div id="offline">Not live (menu, pause or replay): showing the last values</div>
+
+<main>
+  <!-- ============ LEFT: instruments ============ -->
+  <div class="col">
+    <section class="card" style="flex: 3.4 1 0">
+      <h2>Speed</h2>
+      <div class="cbody" style="--h: 210px">
+        <canvas id="gauge"></canvas>
+        <div class="gear"><small>GEAR</small><span id="gear">N</span></div>
+      </div>
+      <div class="label"><span>RPM</span><span id="rpm">0</span></div>
+      <div class="bar"><div id="rpmFill"></div></div>
+    </section>
+
+    <section class="card" style="flex: 2 1 0">
+      <h2>Inputs</h2>
+      <div class="cbody stack">
+        <div class="irow"><span>Throttle</span><div class="bar"><div id="gasFill"></div></div><b id="gasTxt">0%</b></div>
+        <div class="irow"><span>Brake</span><div class="bar"><div id="brakeFill"></div></div><b id="brakeTxt">0%</b></div>
+        <div class="irow"><span>Steering</span><div class="steer"><div id="steerDot"></div></div><b id="steerTxt">0.00</b></div>
+      </div>
+    </section>
+
+    <section class="card" style="flex: 2.4 1 0">
+      <h2>Lap Timing</h2>
+      <div class="cbody stack">
+        <div class="grid2">
+          <div><div class="l">Lap</div><div class="v" id="lap">0</div></div>
+          <div><div class="l">Current</div><div class="v" id="cur">-</div></div>
+          <div><div class="l">Last</div><div class="v" id="last">-</div></div>
+          <div><div class="l">Best</div><div class="v" id="best">-</div></div>
+        </div>
+        <div>
+          <div class="label"><span>Track position</span><span id="posTxt">0%</span></div>
+          <div class="bar"><div id="posFill" style="background:var(--blue)"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="flex: 1.5 1 0">
+      <h2>Fuel &amp; Status</h2>
+      <div class="cbody stack">
+        <div class="grid2">
+          <div><div class="l">Fuel</div><div class="v" id="fuel">-</div></div>
+          <div><div class="l">Tyres off track</div><div class="v" id="out">0</div></div>
+          <div><div class="l">In pit</div><div class="v" id="pit">no</div></div>
+          <div><div class="l">Updates / s</div><div class="v" id="hz">0</div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ CENTRE: lap traces, tyres, g-force ============ -->
+  <div class="col">
+    <section class="card" style="flex: 6 1 0">
+      <h2>Lap Traces <span style="text-transform:none; letter-spacing:0; font-weight:400">
+        (bright: current lap, grey: previous lap)</span></h2>
+      <div class="cbody" style="--h: 440px"><canvas id="traces"></canvas></div>
+    </section>
+
+    <div class="row" style="flex: 3 1 0">
+      <section class="card" style="flex: 2.4 1 0">
+        <h2>Tyres &amp; Brakes</h2>
+        <div class="cbody" style="--h: 150px"><div class="tyres" id="tyres"></div></div>
+      </section>
+      <section class="card" style="flex: 1 1 0">
+        <h2>G-Force</h2>
+        <div class="cbody" style="--h: 240px"><canvas id="gCanvas"></canvas></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ RIGHT: game view and track map ============ -->
+  <div class="col">
+    <section class="card" style="flex: 4 1 0">
+      <h2>Game View
+        <span class="sp"></span>
+        <select id="camPreset" title="Quality preset">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+        <button id="camBtn">Show camera</button>
+      </h2>
+      <div class="cbody" style="--h: 240px">
+        <div id="camPlaceholder">Camera off. The game screen is only captured while this is showing.</div>
+        <img id="cam" alt="Game camera">
+      </div>
+      <div class="note" id="camInfo">Set the game to borderless windowed.</div>
+    </section>
+
+    <section class="card" style="flex: 5 1 0">
+      <h2>Track Map <span style="text-transform:none; letter-spacing:0; font-weight:400">(colour = speed)</span></h2>
+      <div class="cbody" style="--h: 320px"><canvas id="mapCanvas"></canvas></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* ---------- helpers ---------- */
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const fmtTime = ms => {
+  if (!ms || ms <= 0 || ms > 3.6e6 * 5) return "-";
+  const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
+  return `${m}:${s.toFixed(3).padStart(6, "0")}`;
+};
+
+/* Make a canvas sharp on high-DPI screens; returns a 2D context in CSS pixels */
+function setupCanvas(c) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  }
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+
+/* ---------- settings you may want to tweak ---------- */
+const MAP_FLIP_Z = false;     // set to true if the track map looks mirrored top-to-bottom
+const NB = 1000;              // lap position is split into 1000 bins for traces and the map
+
+/* ---------- state ---------- */
+let meta = { max_rpm: 8000, track_length_m: 0 };
+let lastTrackKey = null, wasLive = false, latest = null;
+let gaugeMax = 300, maxSpeedSeen = 100;
+const gTrail = [];
+
+const nanArr = () => new Float32Array(NB).fill(NaN);
+const newLap = () => ({ speed: nanArr(), rpm: nanArr(), gear: nanArr(), gas: nanArr(), brake: nanArr() });
+let cur = newLap(), prev = null, lastLap = null, curPos = 0;
+
+const track = { x: nanArr(), z: nanArr(), v: nanArr() };     // the track outline, filled as you drive
+let carX = NaN, carZ = NaN;
+let trackDirty = true, lastTrackBuild = 0, layer = null, layerKey = "", mapT = null;
+
+const hasData = lap => { let n = 0; for (let i = 0; i < NB; i++) if (lap.speed[i] === lap.speed[i]) n++; return n > 100; };
+function resetTrack() { track.x.fill(NaN); track.z.fill(NaN); track.v.fill(NaN); trackDirty = true; }
+
+/* ---------- tyre tiles ---------- */
+const WHEELS = ["FL", "FR", "RL", "RR"];
+$("tyres").innerHTML = WHEELS.map((w, i) => `
+  <div class="tyre" id="tyre${i}">
+    <div class="s">${w}</div>
+    <div class="t" id="tt${i}">-</div>
+    <div class="s" id="tp${i}">- psi</div>
+    <div class="s" id="tb${i}">brake -</div>
+  </div>`).join("");
+
+function tyreColor(t) {
+  if (t < 70) return "#2d6cdf";        // cold
+  if (t < 100) return "#1f9d55";       // good
+  if (t < 115) return "#c98a10";       // hot
+  return "#c0392b";                    // very hot
+}
+
+/* ---------- metadata (car / track) ---------- */
+async function loadMeta() {
+  try {
+    const m = await (await fetch("/api/meta")).json();
+    if (m.car) {
+      meta = m;
+      $("session").textContent = `${m.car} · ${m.track} (${m.layout}) · ${m.track_length_m} m`;
+      const key = m.track + "/" + m.layout;
+      if (lastTrackKey !== null && key !== lastTrackKey) { resetTrack(); cur = newLap(); prev = null; }
+      lastTrackKey = key;
+    }
+  } catch (e) { /* server not ready yet */ }
+}
+
+/* ---------- camera ---------- */
+const PRESETS = {
+  low:    { fps: 10, width: 640,  quality: 60 },
+  medium: { fps: 15, width: 960,  quality: 70 },
+  high:   { fps: 20, width: 1280, quality: 75 },
+};
+const CAM_HINT = "Set the game to borderless windowed.";
+let camOn = false, camTimer = null;
+
+function camStart() {
+  const p = PRESETS[$("camPreset").value];
+  $("cam").src = `/video?fps=${p.fps}&width=${p.width}&quality=${p.quality}&_=${Date.now()}`;
+  $("cam").style.display = "block";
+  $("camPlaceholder").style.display = "none";
+  $("camBtn").textContent = "Hide camera";
+  camOn = true;
+  clearInterval(camTimer);
+  camTimer = setInterval(camStats, 2000);
+}
+
+function camStop() {
+  $("cam").src = "";                   // dropping the src closes the stream; the server stops capturing
+  $("cam").removeAttribute("src");
+  $("cam").style.display = "none";
+  $("camPlaceholder").style.display = "flex";
+  $("camBtn").textContent = "Show camera";
+  camOn = false;
+  clearInterval(camTimer);
+  $("camInfo").textContent = CAM_HINT;
+}
+
+async function camStats() {
+  try {
+    const s = await (await fetch("/api/camera")).json();
+    if (s.problem) { $("camInfo").textContent = "Camera: " + s.problem; return; }
+    $("camInfo").textContent =
+      `${s.capture_fps} fps · encode ${s.encode_ms} ms · ${s.frame_kb} KB/frame` +
+      (s.target ? ` · ${s.target}` : "");
+  } catch (e) { /* ignore */ }
+}
+
+$("camBtn").onclick = () => (camOn ? camStop() : camStart());
+$("camPreset").onchange = () => { if (camOn) camStart(); };
+$("cam").onerror = () => { if (camOn) camStats(); };
+
+/* ---------- drawing: speed gauge ---------- */
+function drawGauge(speed) {
+  const { ctx, w, h } = setupCanvas($("gauge"));
+  ctx.clearRect(0, 0, w, h);
+  if (speed > gaugeMax) gaugeMax = Math.ceil(speed / 50) * 50;      // grow the scale if you go faster
+  const R = Math.max(20, Math.min(w / 2 - 14, h * 0.52)), cx = w * 0.45, cy = h * 0.58;
+  const a0 = 0.75 * Math.PI, sweep = 1.5 * Math.PI;                 // 270 degree arc, open at the bottom
+  ctx.lineWidth = Math.max(6, R * 0.14); ctx.lineCap = "round";
+  ctx.strokeStyle = "#1b2748";
+  ctx.beginPath(); ctx.arc(cx, cy, R, a0, a0 + sweep); ctx.stroke();
+  const f = clamp(speed / gaugeMax, 0, 1);
+  if (f > 0.004) {
+    ctx.strokeStyle = f < 0.55 ? "#4da3ff" : f < 0.82 ? "#ffb020" : "#ff4d5a";
+    ctx.beginPath(); ctx.arc(cx, cy, R, a0, a0 + sweep * f); ctx.stroke();
+  }
+  ctx.textAlign = "center"; ctx.fillStyle = "#e8ecf8";
+  ctx.font = `700 ${R * 0.62}px system-ui, sans-serif`;
+  ctx.fillText(Math.round(speed), cx, cy + R * 0.2);
+  ctx.font = `${Math.max(10, R * 0.16)}px system-ui, sans-serif`; ctx.fillStyle = "#8a96b8";
+  ctx.fillText("km/h", cx, cy + R * 0.45);
+  ctx.font = `${Math.max(9, R * 0.12)}px system-ui, sans-serif`;
+  ctx.fillText("0", cx - R * 0.78, cy + R * 0.92);
+  ctx.fillText(gaugeMax, cx + R * 0.78, cy + R * 0.92);
+}
+
+/* ---------- drawing: lap traces (by position around the lap) ---------- */
+const LANES = [
+  { key: "speed", label: "Speed", unit: "km/h", color: "#4da3ff", max: () => Math.max(100, Math.ceil(maxSpeedSeen / 50) * 50) },
+  { key: "rpm",   label: "RPM",   unit: "",     color: "#c77dff", max: () => meta.max_rpm || 8000 },
+  { key: "gear",  label: "Gear",  unit: "",     color: "#ffb020", max: () => 8 },
+  { key: "gas",   label: "Throttle", unit: "",   color: "#38d66b", max: () => 1 },
+  { key: "brake", label: "Brake", unit: "",     color: "#ff4d5a", max: () => 1 },
+];
+
+function plotLane(ctx, arr, x0, pw, y0, ph, max, color, lw) {
+  ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.lineJoin = "round"; ctx.beginPath();
+  let pen = false, last = -10;
+  for (let i = 0; i < NB; i++) {
+    const v = arr[i];
+    if (v !== v) continue;                                   // NaN = no data in this bin
+    const x = x0 + (i / (NB - 1)) * pw, y = y0 + ph - 2 - clamp(v / max, 0, 1) * (ph - 4);
+    if (pen && i - last <= 4) ctx.lineTo(x, y); else ctx.moveTo(x, y);   // break the line over gaps
+    pen = true; last = i;
+  }
+  ctx.stroke();
+}
+
+function drawLapTraces() {
+  const { ctx, w, h } = setupCanvas($("traces"));
+  ctx.clearRect(0, 0, w, h);
+  const left = 66, right = 8, top = 2, bottom = 18;
+  const pw = w - left - right, laneH = (h - top - bottom) / LANES.length;
+
+  // lane backgrounds and labels
+  LANES.forEach((ln, k) => {
+    const y0 = top + k * laneH;
+    ctx.fillStyle = "#0a1128"; ctx.fillRect(left, y0 + 1, pw, laneH - 2);
+    ctx.strokeStyle = "#1b2748"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(left, y0 + laneH / 2); ctx.lineTo(left + pw, y0 + laneH / 2); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "top";
+    ctx.fillStyle = "#c3cbe3"; ctx.font = "600 11px system-ui, sans-serif";
+    ctx.fillText(ln.label, left - 6, y0 + 4);
+    ctx.fillStyle = "#8a96b8"; ctx.font = "10px system-ui, sans-serif";
+    const mx = ln.max();
+    ctx.fillText(ln.key === "gas" || ln.key === "brake" ? "0-100%" : `0-${mx}${ln.unit ? " " + ln.unit : ""}`, left - 6, y0 + 17);
+  });
+
+  // vertical grid and distance labels
+  const L = meta.track_length_m || 0;
+  ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillStyle = "#8a96b8"; ctx.font = "10px system-ui, sans-serif";
+  ctx.strokeStyle = "#1b2748";
+  const ticks = [];
+  if (L > 0) { const step = L > 3500 ? 1000 : L > 1600 ? 500 : 250; for (let m = 0; m <= L; m += step) ticks.push([m / L, m + " m"]); }
+  else { for (let p = 0; p <= 1.001; p += 0.25) ticks.push([p, Math.round(p * 100) + "%"]); }
+  ticks.forEach(([f, label]) => {
+    const x = left + f * pw;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, h - bottom); ctx.stroke();
+    ctx.fillText(label, clamp(x, left + 12, w - 14), h - bottom + 4);
+  });
+
+  // data: previous lap (grey) under the current lap (coloured)
+  LANES.forEach((ln, k) => {
+    const y0 = top + k * laneH, mx = ln.max();
+    if (prev) plotLane(ctx, prev[ln.key], left, pw, y0, laneH, mx, "#5b6785", 1);
+    plotLane(ctx, cur[ln.key], left, pw, y0, laneH, mx, ln.color, 1.8);
+  });
+
+  // cursor at the car's current position
+  const cx = left + clamp(curPos, 0, 1) * pw;
+  ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, h - bottom); ctx.stroke();
+}
+
+/* ---------- drawing: track map ---------- */
+function speedColor(v) {
+  const f = clamp(v / Math.max(100, maxSpeedSeen), 0, 1);
+  return `hsl(${Math.round(240 - 240 * f)} 85% 55%)`;      // slow = blue, fast = red
+}
+
+function buildTrackLayer(w, h) {
+  const dpr = window.devicePixelRatio || 1;
+  if (!layer) layer = document.createElement("canvas");
+  layer.width = Math.round(w * dpr); layer.height = Math.round(h * dpr);
+  const ctx = layer.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const idx = [];
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (let i = 0; i < NB; i++) {
+    const x = track.x[i]; if (x !== x) continue;
+    const z = track.z[i];
+    idx.push(i);
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  if (idx.length < 20) { mapT = null; return; }
+
+  const pad = 18, spanX = Math.max(maxX - minX, 1), spanZ = Math.max(maxZ - minZ, 1);
+  const s = Math.min((w - 2 * pad) / spanX, (h - 2 * pad) / spanZ);       // keep the true shape
+  const ox = (w - spanX * s) / 2, oy = (h - spanZ * s) / 2;
+  const X = x => ox + (x - minX) * s;
+  const Y = z => MAP_FLIP_Z ? oy + (z - minZ) * s : oy + (maxZ - z) * s;
+  mapT = { X, Y };
+
+  // segments between neighbouring bins (the last one wraps to the first to close the loop)
+  const segs = [];
+  for (let k = 0; k < idx.length; k++) {
+    const a = idx[k], b = idx[(k + 1) % idx.length];
+    const gap = (b - a + NB) % NB;
+    if (gap > 0 && gap <= 4) segs.push([a, b]);
+  }
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = "#0a1128"; ctx.lineWidth = 11;                    // dark border
+  ctx.beginPath();
+  segs.forEach(([a, b]) => { ctx.moveTo(X(track.x[a]), Y(track.z[a])); ctx.lineTo(X(track.x[b]), Y(track.z[b])); });
+  ctx.stroke();
+  ctx.lineWidth = 5;                                                   // speed-coloured line
+  segs.forEach(([a, b]) => {
+    ctx.strokeStyle = speedColor((track.v[a] + track.v[b]) / 2);
+    ctx.beginPath(); ctx.moveTo(X(track.x[a]), Y(track.z[a])); ctx.lineTo(X(track.x[b]), Y(track.z[b])); ctx.stroke();
+  });
+  // start / finish marker
+  const f0 = idx[0];
+  ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(X(track.x[f0]), Y(track.z[f0]), 4, 0, 6.2832); ctx.fill();
+}
+
+function drawMap() {
+  const { ctx, w, h } = setupCanvas($("mapCanvas"));
+  ctx.clearRect(0, 0, w, h);
+  const now = performance.now(), key = w + "x" + h;
+  if (key !== layerKey || (trackDirty && now - lastTrackBuild > 500)) {   // rebuild at most twice a second
+    buildTrackLayer(w, h); layerKey = key; trackDirty = false; lastTrackBuild = now;
+  }
+  if (!mapT) {
+    ctx.fillStyle = "#8a96b8"; ctx.textAlign = "center"; ctx.font = "13px system-ui, sans-serif";
+    ctx.fillText("Drive a lap and the track will draw itself", w / 2, h / 2);
+    return;
+  }
+  ctx.drawImage(layer, 0, 0, w, h);
+  if (carX === carX) {
+    const px = mapT.X(carX), py = mapT.Y(carZ);
+    ctx.fillStyle = "#ffb020"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, py, 6, 0, 6.2832); ctx.fill(); ctx.stroke();
+  }
+}
+
+/* ---------- drawing: g-force ---------- */
+function drawG() {
+  const { ctx, w, h } = setupCanvas($("gCanvas"));
+  ctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2, R = Math.max(10, Math.min(w, h) / 2 - 6), MAXG = 2.5;
+  ctx.strokeStyle = "#233056"; ctx.lineWidth = 1;
+  for (let g = 0.5; g <= MAXG; g += 0.5) { ctx.beginPath(); ctx.arc(cx, cy, R * g / MAXG, 0, 6.2832); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+  // NOTE: signs follow AC's accG. If braking moves the dot the wrong way, flip the sign of `lng`.
+  gTrail.forEach((p, i) => {
+    ctx.fillStyle = `rgba(77,163,255,${(i + 1) / gTrail.length * 0.5})`;
+    ctx.beginPath(); ctx.arc(cx + clamp(p.lat / MAXG, -1, 1) * R, cy + clamp(p.lng / MAXG, -1, 1) * R, 3, 0, 6.2832); ctx.fill();
+  });
+  const p = gTrail[gTrail.length - 1];
+  if (p) {
+    ctx.fillStyle = "#ffb020";
+    ctx.beginPath(); ctx.arc(cx + clamp(p.lat / MAXG, -1, 1) * R, cy + clamp(p.lng / MAXG, -1, 1) * R, 6, 0, 6.2832); ctx.fill();
+  }
+}
+
+/* ---------- apply one telemetry sample ---------- */
+function record(d) {
+  // Starting a new lap: keep the finished one as the grey "previous lap" overlay
+  if (lastLap !== null) {
+    if (d.lap < lastLap) { cur = newLap(); prev = null; }                       // session restarted
+    else if (d.lap > lastLap) { if (hasData(cur)) prev = cur; cur = newLap(); }
+  }
+  lastLap = d.lap;
+  const b = clamp(Math.floor(d.pos * NB), 0, NB - 1);
+  cur.speed[b] = d.speed; cur.rpm[b] = d.rpm; cur.gear[b] = Math.max(0, d.gear);
+  cur.gas[b] = d.gas; cur.brake[b] = d.brake;
+  track.x[b] = d.x; track.z[b] = d.z; track.v[b] = d.speed;
+  trackDirty = true;
+}
+
+function update(d) {
+  latest = d;
+  const live = d.status === 2;
+  $("offline").style.display = live ? "none" : "block";
+  if (live && !wasLive) loadMeta();              // refresh car/track when a session goes live
+  wasLive = live;
+
+  $("gear").textContent = d.gear < 0 ? "R" : d.gear === 0 ? "N" : d.gear;
+  $("rpm").textContent = d.rpm;
+  const rpmF = clamp(d.rpm / (meta.max_rpm || 8000), 0, 1);
+  $("rpmFill").style.width = rpmF * 100 + "%";
+  $("rpmFill").style.background = rpmF > 0.92 ? "var(--red)" : "var(--blue)";
+
+  $("gasFill").style.width = d.gas * 100 + "%";     $("gasTxt").textContent = Math.round(d.gas * 100) + "%";
+  $("brakeFill").style.width = d.brake * 100 + "%"; $("brakeTxt").textContent = Math.round(d.brake * 100) + "%";
+
+  // Steering runs -1 (full left) to +1 (full right); the dot is 8px wide so it touches both edges.
+  const p = (clamp(d.steer, -1, 1) + 1) / 2;
+  $("steerTxt").textContent = d.steer.toFixed(2);
+  $("steerDot").style.left = `calc(${p * 100}% - ${p * 8}px)`;
+
+  $("lap").textContent = d.lap;
+  $("cur").textContent = fmtTime(d.cur_time_ms);
+  $("last").textContent = fmtTime(d.last_time_ms);
+  $("best").textContent = fmtTime(d.best_time_ms);
+  $("posFill").style.width = d.pos * 100 + "%";
+  $("posTxt").textContent = (d.pos * 100).toFixed(1) + "%";
+
+  for (let i = 0; i < 4; i++) {
+    const t = d["tyre_temp_" + i];
+    $("tt" + i).textContent = Math.round(t) + "°C";
+    $("tp" + i).textContent = d["tyre_psi_" + i].toFixed(1) + " psi";
+    $("tb" + i).textContent = "brake " + Math.round(d["brake_temp_" + i]) + "°C";
+    $("tyre" + i).style.background = tyreColor(t);
+  }
+  $("fuel").textContent = d.fuel.toFixed(1) + " L";
+  $("out").textContent = d.tyres_out;
+  $("pit").textContent = d.in_pit ? "yes" : "no";
+
+  maxSpeedSeen = Math.max(maxSpeedSeen, d.speed);
+  curPos = d.pos; carX = d.x; carZ = d.z;
+  gTrail.push({ lat: d.g_lat, lng: d.g_long }); if (gTrail.length > 40) gTrail.shift();
+  if (live && !d.in_pit) record(d);              // pit lane positions would mess up the traces and map
+}
+
+/* ---------- draw loop (about 30 times a second; also redraws when the window is resized) ---------- */
+let lastDraw = 0;
+function frame(ts) {
+  if (ts - lastDraw > 30) {
+    lastDraw = ts;
+    drawGauge(latest ? latest.speed : 0);
+    drawLapTraces();
+    drawMap();
+    drawG();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- WebSocket with auto-reconnect ---------- */
+let count = 0;
+setInterval(() => { $("hz").textContent = count; count = 0; }, 1000);
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { $("dot").classList.add("on"); $("connText").textContent = "connected"; loadMeta(); };
+  ws.onmessage = ev => { count++; update(JSON.parse(ev.data)); };
+  ws.onclose = () => {
+    $("dot").classList.remove("on"); $("connText").textContent = "reconnecting...";
+    setTimeout(connect, 1000);
+  };
+}
+connect();
+</script>
+</body>
+</html>

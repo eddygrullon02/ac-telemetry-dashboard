@@ -4,10 +4,10 @@ A real-time telemetry dashboard and post-session analysis pipeline for **Assetto
 
 It reads the game's shared memory at 60 Hz, streams it to a browser dashboard that works on desktop and phone (with a live video feed of the game), and records every session to Parquet so laps can be compared afterwards with SQL.
 
-
+<!-- Add your own images to docs/ and update these two lines:
 ![Dashboard](docs/dashboard.png)
 ![Demo](docs/demo.gif)
-
+-->
 
 ## What it does
 
